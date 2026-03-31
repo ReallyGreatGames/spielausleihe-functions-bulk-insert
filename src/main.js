@@ -9,13 +9,10 @@ export default async ({ req, res, log, error }) => {
   const databases = new Databases(client);
   const createdIds = [];
 
-  // Helper to handle body parsing across different trigger types
   let body = req.bodyJson;
   if (typeof body === 'string') {
-    try {
-      body = JSON.parse(body);
-    } catch (e) {
-      return res.json({ success: false, message: "Invalid JSON body string" }, 400);
+    try { body = JSON.parse(body); } catch (e) {
+      return res.json({ success: false, message: "Invalid JSON body" }, 400);
     }
   }
 
@@ -26,21 +23,19 @@ export default async ({ req, res, log, error }) => {
       throw new Error("Missing databaseId, collectionId, or documents array.");
     }
 
-    log(`Processing ${documents.length} documents...`);
+    const BATCH_SIZE = 25;
+    log(`Processing ${documents.length} documents in batches of ${BATCH_SIZE}...`);
 
-    for (const data of documents) {
-      try {
-        const doc = await databases.createDocument(
-          databaseId,
-          collectionId,
-          ID.unique(),
-          data
-        );
-        createdIds.push(doc.$id);
-      } catch (insertError) {
-        // We throw a standard error but attach the Appwrite error message
-        throw new Error(insertError.message || "Unknown database error");
-      }
+    for (let i = 0; i < documents.length; i += BATCH_SIZE) {
+      const chunk = documents.slice(i, i + BATCH_SIZE);
+
+      const batchResults = await Promise.all(
+        chunk.map(data =>
+          databases.createDocument(databaseId, collectionId, ID.unique(), data)
+        )
+      );
+
+      batchResults.forEach(doc => createdIds.push(doc.$id));
     }
 
     return res.json({ success: true, count: createdIds.length }, 200);
@@ -48,10 +43,10 @@ export default async ({ req, res, log, error }) => {
   } catch (err) {
     error("Transaction failed: " + err.message);
 
-    // Rollback Logic
     if (createdIds.length > 0) {
       log(`Rolling back ${createdIds.length} documents...`);
       try {
+        // Rollback also benefits from batching if the list is huge
         await Promise.all(
           createdIds.map(id => databases.deleteDocument(databaseId, collectionId, id))
         );
@@ -61,7 +56,6 @@ export default async ({ req, res, log, error }) => {
       }
     }
 
-    // Return the error to React with a 500 status code
     return res.json({
       success: false,
       message: err.message,
