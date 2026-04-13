@@ -13,7 +13,7 @@ export default async ({ req, res, log, error }) => {
   }
 
   const client = new Client()
-    .setEndpoint("http://local/v1")
+    .setEndpoint("http://appwrite/v1")
     .setProject(process.env.APPWRITE_FUNCTION_PROJECT_ID)
     .setKey(process.env.APPWRITE_API_KEY);
 
